@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:15
+    container_name: db
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - bookshop_network
+    restart: always
+
+  backend:
+    build: .
+    container_name: backend
+    env_file:
+      - .env
+    volumes:
+      - static_files:/app/staticfiles
+    depends_on:
+      - db
+    networks:
+      - bookshop_network
+    restart: always
+    command: >
+      sh -c "python manage.py migrate &&
+             gunicorn book_shop.wsgi:application --bind 0.0.0.0:8000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_files:/static:ro
+    depends_on:
+      - backend
+    networks:
+      - bookshop_network
+    restart: always
+
+volumes:
+  postgres_data:
+  static_files:
+
+networks:
+  bookshop_network:
+    driver: bridge
