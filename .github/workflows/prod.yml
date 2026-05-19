@@ -1,12 +1,54 @@
 name: Prod - Promotion Only
+
 on:
   push:
     branches:
       - prod
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
-      - name: Prod workflow
-        run: echo "Prod workflow triggered successfully!"
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Deploy from registry (Promotion Only - NO BUILD)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ vars.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            echo "Deploying PROD environment (Promotion Only)..."
+            cd /home/ubuntu/book-shop
+            
+            # Login to ECR
+            aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin ${{ vars.REGISTRY_NAME }}
+            
+            # Read version from IMAGE_VERSION variable
+            IMAGE_VERSION="${{ vars.IMAGE_VERSION }}"
+            echo "Pulling image with version: $IMAGE_VERSION"
+            
+            # Pull the tested image from ECR
+            docker pull ${{ vars.REGISTRY_NAME }}:${IMAGE_VERSION}
+            
+            # Stop old prod containers
+            docker-compose -p prod down || true
+            
+            # Deploy with the tested image
+            docker-compose -p prod up -d
+            
+            echo "PROD deployment successful with version: $IMAGE_VERSION"
+            echo "NO docker build was executed - promotion only!"
