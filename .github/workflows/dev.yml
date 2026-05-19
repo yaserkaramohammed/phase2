@@ -5,6 +5,9 @@ on:
     branches:
       - dev
 
+permissions:
+  contents: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -45,14 +48,12 @@ jobs:
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
 
       - name: Commit artifacts to repo
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Add artifact ${{ env.ARTIFACT_NAME }}"
-          file_pattern: artifacts/
-          commit_user_name: GitHub Actions
-          commit_user_email: actions@github.com
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add artifacts/
+          git commit -m "Add artifact ${{ env.ARTIFACT_NAME }}" || echo "No changes to commit"
+          git push
 
       - name: Build Docker image from artifact
         run: |
@@ -72,7 +73,6 @@ jobs:
         run: |
           docker tag book-shop:dev-latest ${{ vars.REGISTRY_NAME }}:dev-latest
           docker push ${{ vars.REGISTRY_NAME }}:dev-latest
-          echo "Image pushed: ${{ vars.REGISTRY_NAME }}:dev-latest"
 
       - name: Deploy to EC2
         uses: appleboy/ssh-action@master
@@ -81,11 +81,8 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            set -e
-            echo "Deploying to EC2..."
             cd /home/ubuntu/book-shop
             aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin ${{ vars.REGISTRY_NAME }}
             docker pull ${{ vars.REGISTRY_NAME }}:dev-latest || true
             docker-compose -p dev down || true
             docker-compose -p dev up -d
-            echo "Dev deployment successful!"
