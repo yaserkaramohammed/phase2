@@ -1,0 +1,79 @@
+name: Test - Image-First Pipeline
+
+on:
+  push:
+    branches:
+      - test
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Collect static files
+        run: |
+          python manage.py collectstatic --noinput
+
+      - name: Create artifact
+        run: |
+          mkdir -p artifacts
+          COMMIT_SHA=${{ github.sha }}
+          ARTIFACT_NAME="app-${COMMIT_SHA:0:8}.tar.gz"
+          tar -czf artifacts/$ARTIFACT_NAME \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.env' \
+            --exclude='venv' \
+            --exclude='.venv' \
+            book_shop books dist nginx templates db.sqlite3 manage.py requirements.txt poetry.lock pyproject.toml .env.example
+          echo "ARTIFACT=$ARTIFACT_NAME" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          docker build -t book-shop:test .
+
+      - name: Tag and push image to ECR
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker tag book-shop:test ${{ vars.REGISTRY_NAME }}:${IMAGE_TAG:0:8}
+          docker tag book-shop:test ${{ vars.REGISTRY_NAME }}:test-latest
+          docker push ${{ vars.REGISTRY_NAME }}:${IMAGE_TAG:0:8}
+          docker push ${{ vars.REGISTRY_NAME }}:test-latest
+          echo "IMAGE_VERSION=${IMAGE_TAG:0:8}" >> $GITHUB_ENV
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ vars.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/book-shop || mkdir -p /home/ubuntu/book-shop && cd /home/ubuntu/book-shop
+            docker login -u AWS -p $(aws ecr get-login-password --region eu-central-1) ${{ vars.REGISTRY_NAME }}
+            docker-compose -p test pull || true
+            docker-compose -p test down || true
+            docker-compose -p test up -d

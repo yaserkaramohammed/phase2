@@ -1,0 +1,82 @@
+name: Dev - Artifact-First Pipeline
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Collect static files
+        run: |
+          python manage.py collectstatic --noinput
+
+      - name: Create artifact
+        run: |
+          mkdir -p artifacts
+          COMMIT_SHA=${{ github.sha }}
+          ARTIFACT_NAME="app-${COMMIT_SHA:0:8}.tar.gz"
+          tar -czf artifacts/$ARTIFACT_NAME \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.env' \
+            --exclude='venv' \
+            --exclude='.venv' \
+            book_shop books dist nginx templates db.sqlite3 manage.py requirements.txt poetry.lock pyproject.toml .env.example
+          echo "ARTIFACT=$ARTIFACT_NAME" >> $GITHUB_ENV
+
+      - name: Commit artifact to repo
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Add artifact ${{ env.ARTIFACT }}"
+          file_pattern: artifacts/
+
+      - name: Build Docker image from artifact
+        run: |
+          docker build -t book-shop:dev .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin ${{ vars.REGISTRY_NAME }}
+
+      - name: Push image to ECR
+        run: |
+          docker tag book-shop:dev ${{ vars.REGISTRY_NAME }}:dev-latest
+          docker push ${{ vars.REGISTRY_NAME }}:dev-latest
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ vars.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/book-shop || mkdir -p /home/ubuntu/book-shop && cd /home/ubuntu/book-shop
+            docker login -u AWS -p $(aws ecr get-login-password --region eu-central-1) ${{ vars.REGISTRY_NAME }}
+            docker-compose -p dev pull || true
+            docker-compose -p dev down || true
+            docker-compose -p dev up -d
