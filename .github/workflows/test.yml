@@ -1,0 +1,12 @@
+name: Test - Image-First Pipeline
+on:
+  push:
+    branches:
+      - test
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test workflow
+        run: echo "Test workflow triggered successfully!"
