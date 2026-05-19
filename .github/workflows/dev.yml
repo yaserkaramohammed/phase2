@@ -51,6 +51,8 @@ jobs:
           file_pattern: artifacts/
           commit_user_name: GitHub Actions
           commit_user_email: actions@github.com
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Docker image from artifact
         run: |
