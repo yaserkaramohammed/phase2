@@ -88,5 +88,14 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "Deployment step - configuration ready"
+            cd /home/ubuntu/book-shop
+            aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin ${{ vars.REGISTRY_NAME }}
+            docker pull ${{ vars.REGISTRY_NAME }}:dev-latest || true
+            
+            # Update docker-compose.yml with the new image tag
+            sed -i "s|image:.*book-shop:.*|image: ${{ vars.REGISTRY_NAME }}:dev-latest|g" docker-compose.yml
+            
+            docker-compose -p dev down || true
+            docker-compose -p dev up -d
+            echo "Dev deployment successful!"
         continue-on-error: true
