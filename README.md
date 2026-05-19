@@ -47,3 +47,5 @@ A Django book shop app containerized using Docker, PostgreSQL, and Nginx.
 
 ## To stop
    docker-compose down
+
+# Phase 2 CI/CD Testing
